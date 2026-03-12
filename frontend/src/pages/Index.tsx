@@ -1,17 +1,19 @@
 import { useState } from "react";
+import axios from "axios";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import Header from "@/components/Header";
 import ResumeUpload from "@/components/ResumeUpload";
 import JobDescription from "@/components/JobDescription";
 import ResultsSection from "@/components/ResultsSection";
-import { analyzeResume, getMockResult, type AnalysisResult } from "@/lib/api";
+import { analyzeResume, getMockResult, uploadResume, type AnalysisResult } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 
 const Index = () => {
   const [file, setFile] = useState<File | null>(null);
   const [jobDesc, setJobDesc] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
 
   const handleAnalyze = async () => {
@@ -25,15 +27,26 @@ const Index = () => {
     }
 
     setLoading(true);
+    setError(null);
     setResult(null);
+
     try {
-      const data = await analyzeResume(file, jobDesc);
+      const { extracted_text } = await uploadResume(file);
+      const data = await analyzeResume(extracted_text, jobDesc);
       setResult(data);
       toast.success("Analysis complete!");
-    } catch {
-      // Fallback to mock data when backend is unavailable
-      toast.info("Backend unavailable — showing demo results.");
-      await new Promise((r) => setTimeout(r, 1500));
+    } catch (err: unknown) {
+      const message =
+        axios.isAxiosError(err) && err.response?.data?.detail
+          ? String(err.response.data.detail)
+          : err instanceof Error
+          ? err.message
+          : "An unexpected error occurred.";
+
+      setError(message);
+      toast.error(message);
+
+      // Fallback to mock data when backend is unavailable (optional)
       setResult(getMockResult());
     } finally {
       setLoading(false);
@@ -49,7 +62,7 @@ const Index = () => {
           <JobDescription value={jobDesc} onChange={setJobDesc} />
         </div>
 
-        <div className="flex justify-center">
+        <div className="flex flex-col items-center gap-3">
           <Button
             size="lg"
             onClick={handleAnalyze}
@@ -65,6 +78,12 @@ const Index = () => {
               "Analyze Resume"
             )}
           </Button>
+
+          {error && (
+            <p className="text-sm text-destructive text-center max-w-xl">
+              {error}
+            </p>
+          )}
         </div>
 
         {result && <ResultsSection result={result} />}

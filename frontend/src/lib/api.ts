@@ -2,6 +2,12 @@ import axios from "axios";
 
 const API_BASE = "http://localhost:8000";
 
+export interface UploadResult {
+  filename: string;
+  extracted_text: string;
+  char_count: number;
+}
+
 export interface AnalysisResult {
   skill_match: number;
   missing_skills: string[];
@@ -9,7 +15,7 @@ export interface AnalysisResult {
   learning_path: string[];
 }
 
-export async function uploadResume(file: File): Promise<{ filename: string }> {
+export async function uploadResume(file: File): Promise<UploadResult> {
   const formData = new FormData();
   formData.append("file", file);
   const res = await axios.post(`${API_BASE}/upload-resume`, formData, {
@@ -19,14 +25,12 @@ export async function uploadResume(file: File): Promise<{ filename: string }> {
 }
 
 export async function analyzeResume(
-  file: File,
-  jobDescription: string
+  resume_text: string,
+  job_description: string
 ): Promise<AnalysisResult> {
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("job_description", jobDescription);
-  const res = await axios.post(`${API_BASE}/analyze`, formData, {
-    headers: { "Content-Type": "multipart/form-data" },
+  const res = await axios.post(`${API_BASE}/analyze`, {
+    resume_text,
+    job_description,
   });
   return res.data;
 }

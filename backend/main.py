@@ -1,10 +1,10 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import Body, FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from models import AnalyzeResponse, UploadResponse
+from models import AnalyzeRequest, AnalyzeResponse, UploadResponse
 from resume_parser import extract_text_from_pdf
 from ai_engine import analyze_resume_with_ai
 
@@ -79,13 +79,33 @@ async def upload_resume(file: UploadFile = File(...)):
 # ---------------------------------------------------------------------------
 @app.post("/analyze", response_model=AnalyzeResponse, tags=["Analysis"])
 async def analyze(
-    file: UploadFile = File(...),
-    job_description: str = Form(...),
+    file: UploadFile | None = File(None),
+    job_description: str | None = Form(None),
+    request: AnalyzeRequest | None = Body(None),
 ):
+    """Analyze a resume against a job description using AI.
+
+    Supports two modes:
+    1) Multipart form upload (PDF file + job_description)
+    2) JSON body ({ resume_text, job_description })
     """
-    Analyze a resume PDF against a job description using AI.
-    Returns skill match percentage, missing skills, suggestions, and a learning path.
-    """
+
+    # JSON mode (preferred for single-call analysis)
+    if request is not None:
+        if not request.job_description.strip():
+            raise HTTPException(status_code=400, detail="Job description cannot be empty.")
+        if not request.resume_text.strip():
+            raise HTTPException(status_code=400, detail="Resume text cannot be empty.")
+
+        return analyze_resume_with_ai(request.resume_text, request.job_description)
+
+    # Multipart/form mode (legacy)
+    if job_description is None or file is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Expected either JSON body or multipart form with file + job_description.",
+        )
+
     if not job_description.strip():
         raise HTTPException(status_code=400, detail="Job description cannot be empty.")
 
@@ -101,6 +121,22 @@ async def analyze(
     resume_text = extract_text_from_pdf(file_bytes, file.filename or "resume.pdf")
 
     # Step 2: Send to AI for analysis
-    result = analyze_resume_with_ai(resume_text, job_description)
+    return analyze_resume_with_ai(resume_text, job_description)
+
+
+# ---------------------------------------------------------------------------
+# POST /analyze-text
+# Accepts JSON: { resume_text, job_description }
+# ---------------------------------------------------------------------------
+@app.post("/analyze-text", response_model=AnalyzeResponse, tags=["Analysis"])
+async def analyze_text(request: AnalyzeRequest):
+    """Analyze resume text against a job description using AI."""
+    if not request.job_description.strip():
+        raise HTTPException(status_code=400, detail="Job description cannot be empty.")
+
+    if not request.resume_text.strip():
+        raise HTTPException(status_code=400, detail="Resume text cannot be empty.")
+
+    result = analyze_resume_with_ai(request.resume_text, request.job_description)
 
     return result
