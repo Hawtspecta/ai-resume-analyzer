@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const API_BASE = "https://ai-resume-backend.onrender.com";
+const API_BASE = "https://ai-resume-backend-aox1.onrender.com";
 
 export interface UploadResult {
   filename: string;
