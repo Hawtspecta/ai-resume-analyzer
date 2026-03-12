@@ -90,7 +90,7 @@ const Index = () => {
       </main>
 
       <footer className="py-4 text-center text-xs text-muted-foreground">
-        AI Resume Analyzer · Built with React & Tailwind
+        AI Resume Analyzer &copy; 2026.
       </footer>
     </div>
   );

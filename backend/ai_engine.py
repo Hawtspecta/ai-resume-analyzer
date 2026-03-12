@@ -5,17 +5,11 @@ from fastapi import HTTPException
 from models import AnalyzeResponse
 
 # ---------------------------------------------------------------------------
-# xAI / Grok API Configuration
+# Groq API Configuration (Free tier - 14,400 requests/day, no credit card)
 # ---------------------------------------------------------------------------
-# Set this environment variable before starting the server:
-#   export XAI_API_KEY="your_key_here"
-XAI_API_KEY: str = os.getenv("XAI_API_KEY", "")
-
-# xAI uses an OpenAI-compatible REST endpoint
-XAI_API_URL: str = "https://api.x.ai/v1/chat/completions"
-
-# Latest stable Grok model — change to "grok-beta" if needed
-XAI_MODEL: str = "grok-3-mini"
+GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+GROQ_API_URL: str = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODEL: str = "llama-3.3-70b-versatile"
 
 
 # ---------------------------------------------------------------------------
@@ -51,16 +45,8 @@ Return ONLY the raw JSON object. Do not wrap it in code fences.\
 # Public entry point
 # ---------------------------------------------------------------------------
 def analyze_resume_with_ai(resume_text: str, job_description: str) -> AnalyzeResponse:
-    """
-    Send resume_text and job_description to the xAI Grok API.
-    Returns a validated AnalyzeResponse containing:
-      - skill_match (float 0-100)
-      - missing_skills (list[str])
-      - suggestions (list[str])
-      - learning_path (list[str])
-    """
     _check_api_key()
-    raw_content = _call_xai_api(resume_text, job_description)
+    raw_content = _call_groq_api(resume_text, job_description)
     parsed = _parse_json(raw_content)
     return _build_response(parsed)
 
@@ -69,31 +55,27 @@ def analyze_resume_with_ai(resume_text: str, job_description: str) -> AnalyzeRes
 # Step 1 — Guard: API key present?
 # ---------------------------------------------------------------------------
 def _check_api_key() -> None:
-    if not XAI_API_KEY:
+    if not GROQ_API_KEY:
         raise HTTPException(
             status_code=503,
             detail=(
-                "XAI_API_KEY environment variable is not set. "
-                "Export it before starting the server:  export XAI_API_KEY=your_key"
+                "GROQ_API_KEY environment variable is not set. "
+                "Add it to your .env file: GROQ_API_KEY=gsk_..."
             ),
         )
 
 
 # ---------------------------------------------------------------------------
-# Step 2 — HTTP call to xAI
+# Step 2 — HTTP call to Groq
 # ---------------------------------------------------------------------------
-def _call_xai_api(resume_text: str, job_description: str) -> str:
-    """
-    POST to https://api.x.ai/v1/chat/completions and return the raw
-    assistant message string.
-    """
+def _call_groq_api(resume_text: str, job_description: str) -> str:
     headers = {
-        "Authorization": f"Bearer {XAI_API_KEY}",
+        "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json",
     }
 
     payload = {
-        "model": XAI_MODEL,
+        "model": GROQ_MODEL,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
@@ -104,23 +86,18 @@ def _call_xai_api(resume_text: str, job_description: str) -> str:
                 ),
             },
         ],
-        "temperature": 0.2,   # Low temp = more deterministic, consistent JSON
+        "temperature": 0.2,
         "max_tokens": 1024,
     }
 
     try:
-        response = requests.post(
-            XAI_API_URL,
-            headers=headers,
-            json=payload,
-            timeout=60,
-        )
+        response = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=60)
         response.raise_for_status()
 
     except requests.exceptions.Timeout:
         raise HTTPException(
             status_code=504,
-            detail="Request to xAI API timed out. Please try again.",
+            detail="Request to Groq API timed out. Please try again.",
         )
     except requests.exceptions.HTTPError as exc:
         http_status = exc.response.status_code if exc.response is not None else 500
@@ -130,12 +107,12 @@ def _call_xai_api(resume_text: str, job_description: str) -> str:
             api_message = str(exc)
         raise HTTPException(
             status_code=http_status,
-            detail=f"xAI API error ({http_status}): {api_message}",
+            detail=f"Groq API error ({http_status}): {api_message}",
         )
     except requests.exceptions.ConnectionError:
         raise HTTPException(
             status_code=502,
-            detail="Could not connect to xAI API. Check your network or API URL.",
+            detail="Could not connect to Groq API. Check your network.",
         )
     except requests.exceptions.RequestException as exc:
         raise HTTPException(
@@ -143,13 +120,12 @@ def _call_xai_api(resume_text: str, job_description: str) -> str:
             detail=f"Unexpected request failure: {str(exc)}",
         )
 
-    # Pull out the assistant reply text
     try:
         return response.json()["choices"][0]["message"]["content"].strip()
     except (KeyError, IndexError, TypeError) as exc:
         raise HTTPException(
             status_code=502,
-            detail=f"Unexpected xAI response structure: {str(exc)}",
+            detail=f"Unexpected Groq response structure: {str(exc)}",
         )
 
 
@@ -157,16 +133,10 @@ def _call_xai_api(resume_text: str, job_description: str) -> str:
 # Step 3 — Parse JSON from the model's reply
 # ---------------------------------------------------------------------------
 def _parse_json(raw: str) -> dict:
-    """
-    Parse the model output as JSON.
-    Defensively strips markdown code fences in case the model ignores instructions.
-    """
     cleaned = raw
 
-    # Handle ```json ... ``` or ``` ... ```
     if cleaned.startswith("```"):
         lines = cleaned.splitlines()
-        # Drop the opening fence line (```json or ```) and closing fence line
         start = 1
         end = len(lines) - 1 if lines[-1].strip() == "```" else len(lines)
         cleaned = "\n".join(lines[start:end]).strip()
@@ -177,7 +147,7 @@ def _parse_json(raw: str) -> dict:
         raise HTTPException(
             status_code=502,
             detail=(
-                f"xAI returned invalid JSON: {str(exc)}. "
+                f"Groq returned invalid JSON: {str(exc)}. "
                 f"Raw (first 300 chars): {raw[:300]}"
             ),
         )
@@ -185,7 +155,7 @@ def _parse_json(raw: str) -> dict:
     if not isinstance(data, dict):
         raise HTTPException(
             status_code=502,
-            detail=f"Expected a JSON object from xAI, got: {type(data).__name__}",
+            detail=f"Expected a JSON object from Groq, got: {type(data).__name__}",
         )
 
     return data
@@ -197,7 +167,7 @@ def _parse_json(raw: str) -> dict:
 def _build_response(data: dict) -> AnalyzeResponse:
     try:
         skill_match = float(data.get("skill_match", 0))
-        skill_match = max(0.0, min(100.0, skill_match))  # clamp to 0-100
+        skill_match = max(0.0, min(100.0, skill_match))
 
         return AnalyzeResponse(
             skill_match=skill_match,

@@ -1,7 +1,9 @@
 from dotenv import load_dotenv
-load_dotenv()
+from pathlib import Path
 
-from fastapi import Body, FastAPI, UploadFile, File, Form, HTTPException
+load_dotenv(Path(__file__).parent / ".env")  # always finds .env next to main.py
+
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from models import AnalyzeRequest, AnalyzeResponse, UploadResponse
@@ -17,14 +19,15 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS — allows the React frontend running on localhost:5173 (Vite default)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
         "http://localhost:3000",
+        "http://localhost:8080",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",
+        "http://127.0.0.1:8080",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -46,9 +49,6 @@ def root():
 # ---------------------------------------------------------------------------
 @app.post("/upload-resume", response_model=UploadResponse, tags=["Resume"])
 async def upload_resume(file: UploadFile = File(...)):
-    """
-    Upload a PDF resume and extract its text content.
-    """
     if file.content_type not in ("application/pdf", "application/octet-stream"):
         raise HTTPException(
             status_code=400,
@@ -60,7 +60,7 @@ async def upload_resume(file: UploadFile = File(...)):
     if len(file_bytes) == 0:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
-    if len(file_bytes) > 10 * 1024 * 1024:  # 10 MB limit
+    if len(file_bytes) > 10 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="File too large. Maximum size is 10 MB.")
 
     extracted_text = extract_text_from_pdf(file_bytes, file.filename or "resume.pdf")
@@ -74,69 +74,13 @@ async def upload_resume(file: UploadFile = File(...)):
 
 # ---------------------------------------------------------------------------
 # POST /analyze
-# Accepts multipart form: file (PDF) + job_description (str)
-# Matches exactly what the frontend sends in api.ts → analyzeResume()
-# ---------------------------------------------------------------------------
-@app.post("/analyze", response_model=AnalyzeResponse, tags=["Analysis"])
-async def analyze(
-    file: UploadFile | None = File(None),
-    job_description: str | None = Form(None),
-    request: AnalyzeRequest | None = Body(None),
-):
-    """Analyze a resume against a job description using AI.
-
-    Supports two modes:
-    1) Multipart form upload (PDF file + job_description)
-    2) JSON body ({ resume_text, job_description })
-    """
-
-    # JSON mode (preferred for single-call analysis)
-    if request is not None:
-        if not request.job_description.strip():
-            raise HTTPException(status_code=400, detail="Job description cannot be empty.")
-        if not request.resume_text.strip():
-            raise HTTPException(status_code=400, detail="Resume text cannot be empty.")
-
-        return analyze_resume_with_ai(request.resume_text, request.job_description)
-
-    # Multipart/form mode (legacy)
-    if job_description is None or file is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Expected either JSON body or multipart form with file + job_description.",
-        )
-
-    if not job_description.strip():
-        raise HTTPException(status_code=400, detail="Job description cannot be empty.")
-
-    file_bytes = await file.read()
-
-    if len(file_bytes) == 0:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-
-    if len(file_bytes) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="File too large. Maximum size is 10 MB.")
-
-    # Step 1: Extract text from PDF
-    resume_text = extract_text_from_pdf(file_bytes, file.filename or "resume.pdf")
-
-    # Step 2: Send to AI for analysis
-    return analyze_resume_with_ai(resume_text, job_description)
-
-
-# ---------------------------------------------------------------------------
-# POST /analyze-text
 # Accepts JSON: { resume_text, job_description }
 # ---------------------------------------------------------------------------
-@app.post("/analyze-text", response_model=AnalyzeResponse, tags=["Analysis"])
-async def analyze_text(request: AnalyzeRequest):
-    """Analyze resume text against a job description using AI."""
+@app.post("/analyze", response_model=AnalyzeResponse, tags=["Analysis"])
+async def analyze(request: AnalyzeRequest):
     if not request.job_description.strip():
         raise HTTPException(status_code=400, detail="Job description cannot be empty.")
-
     if not request.resume_text.strip():
         raise HTTPException(status_code=400, detail="Resume text cannot be empty.")
 
-    result = analyze_resume_with_ai(request.resume_text, request.job_description)
-
-    return result
+    return analyze_resume_with_ai(request.resume_text, request.job_description)
